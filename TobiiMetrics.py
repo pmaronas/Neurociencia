@@ -107,6 +107,6 @@ if archivo_subido is not None:
         st.error(f"Hubo un error al procesar el archivo: {e}")
 
 else:
-    st.info("A la espera de un archivo Excel para comenzar el análisis.")
+    st.info("A la espera de un archivo Excel para comenzar el análisis...")
     
     

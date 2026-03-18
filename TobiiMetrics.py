@@ -4,13 +4,20 @@ import pandas as pd
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTADO INICIAL
 st.set_page_config(page_title="Tobii Metrics", layout="wide")
 
-# Inicializamos los valores por defecto si no existen
-if 'min_filas' not in st.session_state:
-    st.session_state.min_filas = 4
-if 'max_filas' not in st.session_state:
-    st.session_state.max_filas = 60
-if 'req_sacada' not in st.session_state:
-    st.session_state.req_sacada = False
+# --- INICIALIZACIÓN DE VARIABLES (PONER AL PRINCIPIO DEL ARCHIVO) ---
+if 'min_f' not in st.session_state: 
+    st.session_state.min_f = 4
+if 'max_f' not in st.session_state: 
+    st.session_state.max_f = 60
+if 'req_sac_pre' not in st.session_state: 
+    st.session_state.req_sac_pre = False
+if 'req_sac_post' not in st.session_state: 
+    st.session_state.req_sac_post = False
+if 'min_sac_post' not in st.session_state: 
+    st.session_state.min_sac_post = 1
+if 'max_sac_post' not in st.session_state: 
+    st.session_state.max_sac_post = 20
+# -------------------------------------------------------------------
 
 st.title("Análisis de Métricas Oculares")
 
@@ -77,32 +84,45 @@ with tab_ajustes:
     # Creamos dos columnas para los inputs numéricos
     c1, c2 = st.columns(2)
     with c1:
-        st.session_state.min_filas = st.number_input(
+        st.session_state.min_f = st.number_input(
             "Mínimo de filas:", 
             min_value=1, 
-            value=st.session_state.min_filas,
+            value=st.session_state.min_f,
             help="Menos de este número de filas no se contará como parpadeo."
         )
     with c2:
-        st.session_state.max_filas = st.number_input(
+        st.session_state.max_f = st.number_input(
             "Máximo de filas:", 
             min_value=1, 
-            value=st.session_state.max_filas,
+            value=st.session_state.max_f,
             help="Más de este número de filas se considerará pérdida de señal larga, no parpadeo."
         )
 
-    st.info(f"Configuración actual: Bloques de {st.session_state.min_filas} a {st.session_state.max_filas} filas.")
+    st.info(f"Configuración actual: Bloques de {st.session_state.min_f} a {st.session_state.max_f} filas.")
 
-    st.subheader("Validación Biomecánica")
+    st.subheader("Condición anterior")
     # AQUÍ ESTÁ LA NUEVA CASILLA
-    st.session_state.req_sacada = st.checkbox(
+    st.session_state.req_sac_pre = st.checkbox(
         "Considerar sacada antes del parpadeo", 
-        value=st.session_state.req_sacada,
+        value=st.session_state.req_sac_pre,
         help="Si se activa, solo se contará como parpadeo si el bloque viene precedido por un movimiento de tipo 'Saccade'."
     )
     
-    if st.session_state.req_sacada:
+    if st.session_state.req_sac_pre:
         st.warning("⚠️ Se ignorarán los parpadeos que no tengan una sacada previa registrada.")
+
+    # Bloque 3: Sacada Posterior (LA NUEVA)
+    st.subheader("Condición Posterior")
+    st.session_state.req_sac_post = st.checkbox("Considerar sacada después del parpadeo", 
+        value=st.session_state.req_sac_post,
+        help="Si se activa, solo se contará como parpadeo si el bloque continúa con una sacada de tiempo a definir por el usuario"
+        )
+    
+    if st.session_state.req_sac_post:
+        c3, c4 = st.columns(2)
+        st.session_state.min_sac_post = c3.number_input("Mínimo filas sacada posterior:", min_value=1, value=st.session_state.min_sac_post)
+        st.session_state.max_sac_post = c4.number_input("Máximo filas sacada posterior:", min_value=1, value=st.session_state.max_sac_post)
+        st.info(f"Filtro activo: La sacada posterior debe durar entre {st.session_state.min_sac_post} y {st.session_state.max_sac_post} filas.")
 
 # --- PESTAÑA DEL CONTADOR ---
 with tab_contador:
@@ -110,7 +130,10 @@ with tab_contador:
 
     if archivo_subido is not None:
         try:
+            # 1. Carga de datos
             df = pd.read_excel(archivo_subido)
+            
+            # 2. Verificación de columnas
             if 'Recording timestamp' in df.columns and 'Eye movement type' in df.columns:
                 tiempos = df['Recording timestamp'].tolist()
                 tipos_movimiento = df['Eye movement type'].tolist()
@@ -118,78 +141,107 @@ with tab_contador:
                 resultados = []
                 num_evento = 1
                 i = 0
-                etiquetas_validas = ['EyesNotFound', 'Unclassified']
+                etiquetas_blink = ['EyesNotFound', 'Unclassified']
                 
+                # 3. Bucle de procesamiento (Lógica de detección)
                 while i < len(tipos_movimiento):
-                    if tipos_movimiento[i] in etiquetas_validas:
+                    if tipos_movimiento[i] in etiquetas_blink:
                         inicio_idx = i
                         tiene_eyes_not_found = False
                         
-                        # Miramos qué había JUSTO ANTES del bloque
-                        sacada_previa = False
-                        if inicio_idx > 0:
-                            if tipos_movimiento[inicio_idx - 1] == 'Saccade':
-                                sacada_previa = True
+                        # A. VERIFICAR SACADA PREVIA
+                        sac_pre = (inicio_idx > 0 and tipos_movimiento[inicio_idx - 1] == 'Saccade')
                         
-                        while i < len(tipos_movimiento) and tipos_movimiento[i] in etiquetas_validas:
-                            if tipos_movimiento[i] == 'EyesNotFound':
+                        # B. CONTAR BLOQUE DE PARPADEO
+                        while i < len(tipos_movimiento) and tipos_movimiento[i] in etiquetas_blink:
+                            if tipos_movimiento[i] == 'EyesNotFound': 
                                 tiene_eyes_not_found = True
                             i += 1
                         
                         fin_idx = i - 1
-                        longitud = fin_idx - inicio_idx + 1
+                        long_blink = fin_idx - inicio_idx + 1
                         
-                        # --- LÓGICA DE FILTRADO ---
-                        cumple_duracion = st.session_state.min_filas <= longitud <= st.session_state.max_filas
-                        cumple_sacada = True # Por defecto es True si la opción está desactivada
+                        # C. VERIFICAR SACADA POSTERIOR
+                        long_sac_post = 0
+                        j = i
+                        while j < len(tipos_movimiento) and tipos_movimiento[j] == 'Saccade':
+                            long_sac_post += 1
+                            j += 1
                         
-                        if st.session_state.req_sacada:
-                            cumple_sacada = sacada_previa
+                        sac_post_valida = (st.session_state.min_sac_post <= long_sac_post <= st.session_state.max_sac_post)
+                        
+                        # D. FILTRADO FINAL SEGÚN AJUSTES
+                        # --- D. FILTRADO FINAL SEGÚN AJUSTES ---
+                
+                        # 1. Condición de duración del parpadeo
+                        cond_parp = st.session_state.min_f <= long_blink <= st.session_state.max_f
+                
+                        # 2. Condición de Sacada Anterior (La puerta de seguridad)
+                        if st.session_state.req_sac_pre:
+                            cond_pre = sac_pre # Solo será True si realmente hubo sacada
+                        else:
+                            cond_pre = True    # Si no está marcada la casilla, dejamos pasar todo
+                
+                        # 3. Condición de Sacada Posterior
+                        if st.session_state.req_sac_post:
+                            cond_post = (long_sac_post > 0 and sac_post_valida)
+                        else:
+                            cond_post = True
 
-                        if cumple_duracion and tiene_eyes_not_found and cumple_sacada:
-                            t_inicio = tiempos[inicio_idx] / 1000000.0
+                        if cond_parp and tiene_eyes_not_found and cond_pre and cond_post:
+                            t_ini = tiempos[inicio_idx] / 1000000.0
                             t_fin = tiempos[fin_idx] / 1000000.0
                             resultados.append({
                                 'Parpadeo': num_evento,
-                                'Inicio (s)': round(t_inicio, 4),
+                                'Inicio (s)': round(t_ini, 4),
                                 'Fin (s)': round(t_fin, 4),
-                                'Duración (s)': round(t_fin - t_inicio, 4),
-                                'Nº de Filas': longitud,
-                                'Sacada Previa': "Sí" if sacada_previa else "No"
+                                'Duración (s)': round(t_fin - t_ini, 4),
+                                'Filas Parpadeo': long_blink,
+                                'Sacada Previa': "Sí" if sac_pre else "No",
+                                'Filas Sacada Posterior': long_sac_post
                             })
                             num_evento += 1
                     else:
                         i += 1
                 
+                # 4. PRESENTACIÓN DE RESULTADOS
                 df_resultados = pd.DataFrame(resultados)
+
                 if not df_resultados.empty:
                     st.success(f"Se han detectado {len(df_resultados)} parpadeos.")
+                    
+                    # Corrección visual del índice
                     df_resultados.index = df_resultados.index + 1
                     st.dataframe(df_resultados, use_container_width=True)
-                    
-                    # MÉTRICAS Y TIEMPOS
+
+                    # --- SECCIÓN DE MÉTRICAS ---
                     st.divider()
-                
                     col_m1, col_m2 = st.columns(2)
                     
                     duracion_total_seg = (tiempos[-1] - tiempos[0]) / 1000000.0
                     frecuencia_min = (len(df_resultados) / duracion_total_seg) * 60
                     duracion_media_ms = round(df_resultados['Duración (s)'].mean() * 1000)
+                    
                     with col_m1:
                         st.metric("Frecuencia media de parpadeo", f"{frecuencia_min:.0f} parpadeos/min")
                     with col_m2:
-                        st.metric("Duración media del parpadeo", f"{duracion_media_ms} ms")
+                        st.metric("Duración media del parpadeo (ojo completamente cerrado)", f"{duracion_media_ms} ms")
 
+                    # Metadatos del archivo
                     c_meta1, c_meta2 = st.columns(2)
                     with c_meta1:
                         st.metric("Total de filas procesadas", f"{len(df):,}".replace(',', '.'))
                     with c_meta2:
-                        total_seg = (tiempos[-1] - tiempos[0]) / 1000000.0
-                        h, m, s = int(total_seg//3600), int((total_seg%3600)//60), int(total_seg%60)
+                        h = int(duracion_total_seg // 3600)
+                        m = int((duracion_total_seg % 3600) // 60)
+                        s = int(duracion_total_seg % 60)
                         st.metric("Duración de la grabación", f"{h:02d}:{m:02d}:{s:02d}")
+                
                 else:
                     st.warning("No se detectaron eventos con los ajustes actuales.")
+
             else:
-                st.error("Columnas necesarias no encontradas.")
+                st.error("El archivo no tiene las columnas necesarias: 'Recording timestamp' y 'Eye movement type'.")
+
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Hubo un error al procesar el archivo: {e}")

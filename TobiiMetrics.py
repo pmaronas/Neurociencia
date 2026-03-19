@@ -17,6 +17,12 @@ if 'min_sac_post' not in st.session_state:
     st.session_state.min_sac_post = 1
 if 'max_sac_post' not in st.session_state: 
     st.session_state.max_sac_post = 20
+if 'req_vel_post' not in st.session_state: 
+    st.session_state.req_vel_post = False
+if 'min_vel_post' not in st.session_state: 
+    st.session_state.min_vel_post = 100.0
+if 'max_vel_post' not in st.session_state: 
+    st.session_state.max_vel_post = 700.0
 # -------------------------------------------------------------------
 
 st.title("Análisis de Métricas Oculares")
@@ -98,6 +104,12 @@ with tab_ajustes:
             help="Más de este número de filas se considerará pérdida de señal larga, no parpadeo."
         )
 
+    # Ventana de ayuda para duración
+    with st.popover("�"):
+        st.write("La duración se mide en número de filas consecutivas de 'EyesNotFound'.")
+        st.image("ayuda1.png", caption="Esquema de duración del parpadeo")
+
+
     st.info(f"Configuración actual: Bloques de {st.session_state.min_f} a {st.session_state.max_f} filas.")
 
     st.subheader("Condición anterior")
@@ -105,24 +117,45 @@ with tab_ajustes:
     st.session_state.req_sac_pre = st.checkbox(
         "Considerar sacada antes del parpadeo", 
         value=st.session_state.req_sac_pre,
-        help="Si se activa, solo se contará como parpadeo si el bloque viene precedido por un movimiento de tipo 'Saccade'."
     )
+
+    # Ventana de ayuda para duración
+    with st.popover("�"):
+        st.write("El algoritmo busca una etiqueta 'Saccade' justo antes del inicio del parpadeo.")
+        st.image("ayuda2.png", caption="Ejemplo de sacada previa al parpadeo")
     
     if st.session_state.req_sac_pre:
         st.warning("⚠️ Se ignorarán los parpadeos que no tengan una sacada previa registrada.")
 
-    # Bloque 3: Sacada Posterior (LA NUEVA)
+    # --- 3. CONDICIÓN POSTERIOR ---
     st.subheader("Condición Posterior")
-    st.session_state.req_sac_post = st.checkbox("Considerar sacada después del parpadeo", 
-        value=st.session_state.req_sac_post,
-        help="Si se activa, solo se contará como parpadeo si el bloque continúa con una sacada de tiempo a definir por el usuario"
-        )
+    st.checkbox("Considerar sacada después del parpadeo", key="req_sac_post")
     
     if st.session_state.req_sac_post:
+        # A. Filtro por Filas (Duración)
+        st.write("Filtro por duración:")
         c3, c4 = st.columns(2)
-        st.session_state.min_sac_post = c3.number_input("Mínimo filas sacada posterior:", min_value=1, value=st.session_state.min_sac_post)
-        st.session_state.max_sac_post = c4.number_input("Máximo filas sacada posterior:", min_value=1, value=st.session_state.max_sac_post)
-        st.info(f"Filtro activo: La sacada posterior debe durar entre {st.session_state.min_sac_post} y {st.session_state.max_sac_post} filas.")
+        c3.number_input("Mínimo filas sacada:", min_value=1, key="min_sac_post")
+        c4.number_input("Máximo filas sacada:", min_value=1, key="max_sac_post")
+
+        with st.popover("�"):
+            st.write("Se analiza si existe un movimiento sacádico inmediatamente después del parpadeo.")
+            st.image("ayuda3.png", caption="Ejemplo de sacada posterior al parpadeo")
+
+        
+        # B. Filtro por Velocidad (NUEVO)
+        st.write("Filtro por velocidad angular:")
+        st.checkbox("Filtrar por velocidad angular pico (º/s)", key="req_vel_post")
+        
+        if st.session_state.req_vel_post:
+            cv1, cv2 = st.columns(2)
+            cv1.number_input("Velocidad pico mínima (º/s):", min_value=0.0, key="min_vel_post")
+            cv2.number_input("Velocidad pico máxima (º/s):", min_value=0.0, key="max_vel_post")
+            st.info(f"Filtro activo: La sacada debe alcanzar entre {st.session_state.min_vel_post} y {st.session_state.max_vel_post} º/s.")
+
+            with st.popover("�"):
+                st.write("Se analiza la velocidad angular máxima del ojo durante el movimiento sacádico posterior.")
+                st.image("ayuda4.png", caption="Esquema del cálculo de la velocidad angular")
 
 # --- PESTAÑA DEL CONTADOR ---
 with tab_contador:
@@ -132,6 +165,51 @@ with tab_contador:
         try:
             # 1. Carga de datos
             df = pd.read_excel(archivo_subido)
+
+            import numpy as np # Asegúrate de tener el import arriba
+
+            # --- CÁLCULO PREVIO DE VELOCIDAD ANGULAR ---
+            # 1. Extraemos los vectores y el tiempo
+            gzx = df['Gaze direction left X'].fillna(0).values
+            gzy = df['Gaze direction left Y'].fillna(0).values
+            gzz = df['Gaze direction left Z'].fillna(0).values
+            t_seg = df['Recording timestamp'].values / 1000000.0
+            
+            # 2. Preparamos un array para las velocidades (mismo tamaño que el DF)
+            velocidades = np.zeros(len(df))
+            
+            for k in range(1, len(df)):
+                # Si hay EyesNotFound (0), la velocidad es 0
+                if gzx[k] == 0 or gzx[k-1] == 0:
+                    continue
+                
+                # Delta t
+                dt = t_seg[k] - t_seg[k-1]
+                if dt <= 0: continue
+    
+                # Vectores v1 y v2
+                v1 = np.array([gzx[k-1], gzy[k-1], gzz[k-1]])
+                v2 = np.array([gzx[k], gzy[k], gzz[k]])
+     
+                # Producto escalar y módulos
+                prod_esc = np.dot(v1, v2)
+                mod1 = np.linalg.norm(v1)
+                mod2 = np.linalg.norm(v2)
+    
+                # Coseno de theta (protegido entre -1 y 1)
+                cos_theta = np.clip(prod_esc / (mod1 * mod2), -1.0, 1.0)
+    
+                # Ángulo en grados
+                theta_rad = np.arccos(cos_theta)
+                theta_deg = np.degrees(theta_rad)
+     
+                # Velocidad angular (º/s)
+                velocidades[k] = theta_deg / dt
+
+            # Añadimos la columna al dataframe original por si la quieres consultar
+            df['Velocidad Angular'] = velocidades
+
+            
             
             # 2. Verificación de columnas
             if 'Recording timestamp' in df.columns and 'Eye movement type' in df.columns:
@@ -163,12 +241,26 @@ with tab_contador:
                         
                         # C. VERIFICAR SACADA POSTERIOR
                         long_sac_post = 0
+                        vel_pico = 0.0
                         j = i
+                        indices_sacada = [] # Guardaremos los índices para buscar la velocidad
+                        
                         while j < len(tipos_movimiento) and tipos_movimiento[j] == 'Saccade':
                             long_sac_post += 1
+                            indices_sacada.append(j)
                             j += 1
                         
+                        # Si hay sacada, buscamos la velocidad máxima en esos índices
+                        if indices_sacada:
+                            vel_pico = df['Velocidad Angular'].iloc[indices_sacada].max()
+                        
                         sac_post_valida = (st.session_state.min_sac_post <= long_sac_post <= st.session_state.max_sac_post)
+                        
+                     
+                        # Comprobamos la velocidad pico solo si la casilla está marcada
+                        vel_post_valida = True 
+                        if st.session_state.req_vel_post:
+                            vel_post_valida = (st.session_state.min_vel_post <= vel_pico <= st.session_state.max_vel_post)
                         
                         # D. FILTRADO FINAL SEGÚN AJUSTES
                         # --- D. FILTRADO FINAL SEGÚN AJUSTES ---
@@ -181,10 +273,13 @@ with tab_contador:
                             cond_pre = sac_pre # Solo será True si realmente hubo sacada
                         else:
                             cond_pre = True    # Si no está marcada la casilla, dejamos pasar todo
+
+                            # --- SUSTITUYE LAS LÍNEAS 264 A 267 POR ESTO ---
+
                 
                         # 3. Condición de Sacada Posterior
                         if st.session_state.req_sac_post:
-                            cond_post = (long_sac_post > 0 and sac_post_valida)
+                            cond_post = (long_sac_post > 0 and sac_post_valida and vel_post_valida)
                         else:
                             cond_post = True
 
@@ -198,7 +293,8 @@ with tab_contador:
                                 'Duración (s)': round(t_fin - t_ini, 4),
                                 'Filas Parpadeo': long_blink,
                                 'Sacada Previa': "Sí" if sac_pre else "No",
-                                'Filas Sacada Posterior': long_sac_post
+                                'Filas Sacada Posterior': long_sac_post,
+                                'Velocidad Pico (º/s)': round(vel_pico, 2) 
                             })
                             num_evento += 1
                     else:

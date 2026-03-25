@@ -332,6 +332,40 @@ with tab_contador:
                         m = int((duracion_total_seg % 3600) // 60)
                         s = int(duracion_total_seg % 60)
                         st.metric("Duración de la grabación", f"{h:02d}:{m:02d}:{s:02d}")
+                    
+                    # --- GRÁFICA DE DISTRIBUCIÓN DE DURACIONES ---
+                    st.divider()
+                    st.subheader("Distribución de parpadeos por duración")
+
+                    if not df_resultados.empty:
+                        # 1. Calculamos la duración en ms (Filas * 10)
+                        # # Usamos la columna 'Filas Parpadeo' que ya tienes en el DataFrame
+                        df_resultados['ms'] = df_resultados['Filas Parpadeo'] * 10
+                        
+                        # 2. Agrupamos para contar cuántos parpadeos hay de cada duración
+                        df_counts = df_resultados.groupby('ms').size().reset_index(name='Cantidad')
+                        
+                        # Aseguramos que el eje X sea tratado como número para que mantenga el orden 10, 20, 30...
+                        df_counts = df_counts.sort_values('ms')
+                        
+                        # 3. Creamos la gráfica de barras
+                        import plotly.express as px
+                        
+                        fig = px.bar(
+                            df_counts, 
+                            x='ms', 
+                            y='Cantidad',
+                            labels={'ms': 'Duración (ms)', 'Cantidad': 'Número de Parpadeos'},
+                            text_auto=True, # Pone el número encima de cada barra
+                            template="plotly_dark" # Para que pegue con el modo oscuro de VS Code/Streamlit
+                        )
+
+                        # Ajustamos el eje X para que salte de 10 en 10 si hay muchos datos
+                        fig.update_xaxes(type='linear', tickmode='linear', dtick=10)
+                        fig.update_layout(bargap=0.2)
+
+                        # 4. Mostrar en la web
+                        st.plotly_chart(fig, use_container_width=True)
                 
                 else:
                     st.warning("No se detectaron eventos con los ajustes actuales.")

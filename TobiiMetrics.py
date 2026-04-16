@@ -4,7 +4,7 @@ import pandas as pd
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTADO INICIAL
 st.set_page_config(page_title="Tobii Metrics", layout="wide")
 
-# --- INICIALIZACIÓN DE VARIABLES (PONER AL PRINCIPIO DEL ARCHIVO) ---
+# --- INICIALIZACIÓN DE VARIABLES  ---
 if 'min_f' not in st.session_state: 
     st.session_state.min_f = 4
 if 'max_f' not in st.session_state: 
@@ -113,7 +113,7 @@ with tab_ajustes:
     st.info(f"Configuración actual: Bloques de {st.session_state.min_f} a {st.session_state.max_f} filas.")
 
     st.subheader("Condición anterior")
-    # AQUÍ ESTÁ LA NUEVA CASILLA
+    # NUEVA CASILLA
     st.session_state.req_sac_pre = st.checkbox(
         "Considerar sacada antes del parpadeo", 
         value=st.session_state.req_sac_pre,
@@ -143,7 +143,7 @@ with tab_ajustes:
             st.image("ayuda3.png", caption="Ejemplo de sacada posterior al parpadeo")
 
         
-        # B. Filtro por Velocidad (NUEVO)
+        # B. Filtro por Velocidad 
         st.write("Filtro por velocidad angular:")
         st.checkbox("Filtrar por velocidad angular pico (º/s)", key="req_vel_post")
         
@@ -268,13 +268,13 @@ with tab_contador:
                         # 1. Condición de duración del parpadeo
                         cond_parp = st.session_state.min_f <= long_blink <= st.session_state.max_f
                 
-                        # 2. Condición de Sacada Anterior (La puerta de seguridad)
+                        # 2. Condición de Sacada Anterior 
                         if st.session_state.req_sac_pre:
                             cond_pre = sac_pre # Solo será True si realmente hubo sacada
                         else:
                             cond_pre = True    # Si no está marcada la casilla, dejamos pasar todo
 
-                            # --- SUSTITUYE LAS LÍNEAS 264 A 267 POR ESTO ---
+                            
 
                 
                         # 3. Condición de Sacada Posterior
